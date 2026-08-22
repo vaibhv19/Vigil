@@ -26,17 +26,18 @@ The **Isolated Ephemeral Runtime Sandbox** is managed via the `docker-py` SDK us
 *   **Vigil-Base Image:** A custom, hardened Alpine-based image (`vigil-sandbox-base:latest`) containing only the minimal binaries required for agent tools (e.g., Python, Curl, Bash).
 *   **No Persistence:** The container root filesystem is non-persistent. Only the `/workspace` directory (a temporary Docker volume) survives between tool calls within a single task run, and it is wiped upon task completion.
 
-### 2.2 Container Lifecycle (The "Tool-Call" Loop)
-1.  **Provision:** A container is created using `containers.run()` with `detach=True`.
-2.  **Execution:** Agent's generated code is injected via `exec_run()` into the running container.
-3.  **Capture:** `stdout`, `stderr`, and exit codes are streamed back to the Harness.
-4.  **Enforcement:** Containers are started with:
+### 2.2 Container Lifecycle (Task-Level Sandbox)
+The sandbox lifecycle is defined as one ephemeral container per evaluation task, supporting multiple sequential tool calls within that container, destroyed after task completion/failure/timeout.
+1.  **Provision:** One ephemeral container is created using `containers.run(detach=True)` at the start of the evaluation task.
+2.  **Execution:** The agent's generated code/commands are injected via `exec_run()` into the running container, supporting multiple sequential tool calls.
+3.  **Capture:** The `stdout`, `stderr`, and exit codes are captured and streamed back to the Harness after each tool execution.
+4.  **Enforcement:** The container is created with the following isolation constraints:
     *   `mem_limit="512m"`
     *   `nano_cpus=500000000` (0.5 CPU)
     *   `network_mode="none"` (Unless external API access is explicitly required for the task).
     *   `cap_drop=["ALL"]` (Drop all Linux capabilities).
     *   `security_opt=["no-new-privileges"]`.
-5.  **Termination:** On task completion or timeout, the Harness issues a `stop(timeout=0)` and `remove(v=True)`.
+5.  **Termination:** The container is destroyed after task completion/failure/timeout (the Harness issues a `stop(timeout=0)` and `remove(v=True)`).
 
 ---
 
@@ -64,7 +65,7 @@ Vigil treats an "Agent Task" as a specialized Pytest test case.
 *   **The Action:** The test passes the task prompt to the LangGraph agent.
 *   **The Assertion:** Unlike "vibes-based" evals, the assertion is performed against the **Sandbox State**.
     *   *Example:* `assert sandbox.file_exists("output.csv")` or `assert "200" in sandbox.run_command("curl localhost:8080")`.
-*   **The Reporter:** A custom Pytest plugin (`VigilEvalReporter`) intercepts results and writes the raw tool-call logs and final outcomes into the PostgreSQL `eval_runs` table.
+*   **The Reporter:** A custom Pytest plugin (`VigilEvalReporter`) intercepts results and writes them to PostgreSQL: final outcomes to `task_results` (status: `PASS`/`FAIL`/`ERROR`) and `eval_runs` (status: `PENDING`/`COMPLETED`/`FAILED`), and raw tool-call logs to `tool_calls` (with sequence numbers).
 
 ---
 
@@ -73,7 +74,7 @@ Vigil treats an "Agent Task" as a specialized Pytest test case.
 The development environment is containerized via `docker-compose.dev.yml` to ensure parity across engineering machines.
 
 ### 5.1 Services
-*   **PostgreSQL 16:** Stores task definitions, run logs, and anomaly reports.
+*   **PostgreSQL 16:** Stores `tasks`, `eval_suites`, `eval_runs`, `task_results`, `tool_calls`, and `anomalies`.
 *   **Vigil-API:** The FastAPI backend (Phase 3).
 *   **Vigil-Worker:** The Python process that consumes evaluation tasks and talks to the host's `/var/run/docker.sock`.
 *   **Adminer:** (Optional) Lightweight database GUI for inspecting run logs.

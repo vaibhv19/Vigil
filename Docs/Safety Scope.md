@@ -13,7 +13,11 @@ Vigil Phase 2 implements detection for a strictly enumerated set of risky patter
 *   **Purpose:** Prevents infinite reasoning loops that drain API tokens or saturate host CPU.
 
 ### 1.2 Filesystem Path Violations
-*   **Threshold Logic:** Detection triggers if an agent attempts to write to, modify, or create files in any directory other than the mounted `/workspace` path (e.g., attempts to modify container root `/etc/` or `/usr/bin/`).
+*   **Boundary Enforcement Strategy:**
+    1.  **Non-root execution:** Containers execute as the unprivileged `vigil-user` (UID 1000) to restrict permissions.
+    2.  **Sole writable mount:** The root filesystem is mounted read-only, ensuring that `/workspace` is the only writable directory.
+    3.  **Path validation:** Prior to execution, command arguments are scanned to block paths outside `/workspace`.
+*   **Enforcement vs. Detection:** This is **enforcement + logged detection**. All write attempts to unauthorized directories are blocked by container-level read-only denial. Additionally, the pre-execution path validation layer intercepts and logs these blocked events as `PATH` anomalies in the `anomalies` table with `incident_data` containing the offending command and target paths.
 *   **Purpose:** Prevents agents from attempting to persist across runs by modifying the container's base image.
 
 ### 1.3 Unexpected Process Spawning

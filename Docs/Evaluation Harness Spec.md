@@ -49,6 +49,54 @@ Vigil rejects "LLM-as-a-judge." Scoring is based on the **Terminal State of the 
 *   **`tool_call_count`**: Asserts that the agent solved the task in $\le N$ steps.
 *   **`json_schema`**: If the agent produces a JSON file, validates it against a provided schema.
 
+### 3.2 Pydantic Discriminated Assertion Schema
+All evaluation assertions in task YAML files must conform to the following Pydantic schema. The task YAML is validated against this schema before execution. If validation fails, the task is rejected and not executed.
+
+```python
+from typing import Literal, Union, Optional
+from pydantic import BaseModel, Field
+
+class BaseAssertion(BaseModel):
+    negate: bool = Field(default=False, description="If True, asserts that the condition is NOT met.")
+
+class FileExistsAssertion(BaseAssertion):
+    type: Literal["file_exists"]
+    path: str = Field(..., description="Path to target file relative to /workspace")
+
+class FileContentMatchAssertion(BaseAssertion):
+    type: Literal["file_content_match"]
+    path: str = Field(..., description="Path to target file relative to /workspace")
+    pattern: str = Field(..., description="Pattern to match in file content")
+    strategy: Literal["exact", "regex"] = Field(default="exact", description="Matching strategy to use")
+
+class ExitCodeAssertion(BaseAssertion):
+    type: Literal["exit_code"]
+    expected_value: int = Field(default=0, description="Expected process exit code")
+
+class StdoutContainsAssertion(BaseAssertion):
+    type: Literal["stdout_contains"]
+    pattern: str = Field(..., description="Substring or pattern expected in cumulative stdout")
+    strategy: Literal["exact", "regex"] = Field(default="exact", description="Matching strategy to use")
+
+class ToolCallCountAssertion(BaseAssertion):
+    type: Literal["tool_call_count"]
+    expected_value: int = Field(..., description="Maximum allowed tool calls")
+
+class JsonSchemaAssertion(BaseAssertion):
+    type: Literal["json_schema"]
+    path: str = Field(..., description="Path to target JSON file relative to /workspace")
+    schema_path: str = Field(..., description="Path to expected JSON schema file or JSON schema string")
+
+AssertionSchema = Union[
+    FileExistsAssertion,
+    FileContentMatchAssertion,
+    ExitCodeAssertion,
+    StdoutContainsAssertion,
+    ToolCallCountAssertion,
+    JsonSchemaAssertion
+]
+```
+
 ---
 
 ## 4. Harness Execution Flow
@@ -57,19 +105,19 @@ The harness follows a strict five-stage pipeline for every task in a suite:
 
 1.  **Initialization:**
     *   The `EvalRunner` loads the YAML task definition.
-    *   PostgreSQL creates a new `run_id` entry with `status=STARTED`.
+    *   PostgreSQL creates a new `eval_runs` entry with `status='PENDING'` and a corresponding `task_results` entry.
 2.  **Environment Setup:**
-    *   Docker SDK provisions a fresh container.
+    *   Docker SDK provisions one ephemeral container per evaluation task, supporting multiple sequential tool calls within that container, destroyed after task completion/failure/timeout.
     *   Any `context.files` from the YAML are written to the host path mounted at `/workspace`.
 3.  **Agent Invocation:**
-    *   The Harness passes the `input_prompt` to the LangGraph Agent.
-    *   The Agent enters its reasoning loop. Every tool call is routed through the `VigilSandboxTool`.
+    *   The Harness passes the `input_prompt` to the Agent Adapter.
+    *   The Agent enters its reasoning loop. Every tool call is intercepted and routed through the `VigilSandboxTool` to run inside the sandbox.
 4.  **State Capture:**
     *   After the Agent signals it is finished (or `max_steps` is hit), the Harness halts the sandbox.
     *   The Harness executes internal "Audit Commands" (e.g., `ls -R`, `cat result.txt`) to extract state.
 5.  **Scoring & Persistence:**
     *   The `ScoringEngine` compares the extracted state against the `expected_output` assertions.
-    *   Final results (`PASS`/`FAIL`), latencies, and tool-call logs are committed to PostgreSQL.
+    *   Final outcomes are committed to PostgreSQL: updating `task_results` (status: `PASS`/`FAIL`/`ERROR`), updating `eval_runs` (status: `COMPLETED`/`FAILED`, duration, cost), and inserting any remaining tool executions into `tool_calls`.
 
 ---
 
@@ -153,9 +201,13 @@ max_steps: 2
 
 ---
 
-## 7. Task Decomposition Requirements
-To implement this harness, the following sub-tasks are required:
-1.  **YAML Parser:** Utility to validate and load the Task Schema into Pydantic models.
-2.  **Pytest Plugin:** A custom collector that turns YAML files into parameterizable Pytest tests.
-3.  **Audit Engine:** Logic to run non-agent-visible commands inside the container to verify state after the agent finishes.
-4.  **Result Mapper:** Logic to translate Pytest assertion failures into the PostgreSQL `eval_runs` schema.
+## 7. Task Decomposition & Implementation Roadmap
+
+The implementation of the evaluation harness must follow a structured development order:
+1.  **Core Sandbox:** Set up Docker SDK container provisioning, unprivileged execution, resource limits, read-only root filesystems, and temporary `/workspace` mounts.
+2.  **Tool Interception:** Intercept agent tool requests, routing execution to the sandboxed container via `exec_run`.
+3.  **Evaluation Definitions:** Define the YAML schemas for task definitions, validated via the Pydantic Discriminated Assertion Schema.
+4.  **Deterministic Harness:** Implement the Pytest-based execution engine that runs tasks, collects terminal container state, and runs assertions.
+5.  **Persistence:** Build database schemas and connection layers to log to `eval_suites`, `eval_runs`, `task_results`, `tool_calls`, and `anomalies`.
+6.  **Phase 2 (Anomaly Detection):** Implement execution loop tracking, pre-execution path validation (blocking and logging PATH violations), and subprocess allowlists.
+7.  **Phase 3 (Metrics & Dashboard):** Aggregating execution logs to compute percentiles and token/cost metrics, and presenting them via a web UI.

@@ -20,8 +20,8 @@ As autonomous agents transition from "chatbots" to "act-bots" (executing code, q
 
 ### 2.1 Goals
 *   **Deterministic Scoring:** Provide a `pass/fail` result based on the final state of the sandbox, not just the LLM’s text output.
-*   **Isolation by Default:** Ensure every agent tool-call occurs in a fresh container that is destroyed immediately after execution.
-*   **Regression Tracking:** Store every run's metadata (duration, tool calls, success) in PostgreSQL to compare agent versions.
+*   **Isolation by Default:** Ensure the sandbox lifecycle is one ephemeral container per evaluation task, supporting multiple sequential tool calls within that container, destroyed after task completion/failure/timeout.
+*   **Regression Tracking:** Store execution metadata in PostgreSQL (`eval_runs`, `task_results`, and `tool_calls` tables) to compare agent versions.
 *   **Pattern Detection:** Identify "runaway" agents that loop excessively or attempt restricted filesystem operations.
 
 ### 2.2 Non-Goals
@@ -49,18 +49,18 @@ As autonomous agents transition from "chatbots" to "act-bots" (executing code, q
 ### 4.1 MVP (Build First)
 | ID | Requirement | Description |
 | :--- | :--- | :--- |
-| **F-1.1** | **Ephemeral Provisioning** | System must use Docker SDK to spin up a container with `< 2s` overhead per tool-call. |
+| **F-1.1** | **Ephemeral Provisioning** | System must use Docker SDK to spin up one ephemeral container per evaluation task, supporting multiple sequential tool calls within that container, destroyed after task completion/failure/timeout. |
 | **F-1.2** | **Filesystem Restriction** | Containers must mount only a specific `WORKSPACE_DIR` with no access to host root or environment variables. |
 | **F-1.3** | **Hard Teardown** | System must guarantee container removal (SIGKILL) even if the agent process hangs or the harness crashes. |
 | **F-1.4** | **Pytest Integration** | Evaluation tasks must be definable as standard Pytest functions that assert on sandbox state (files, exit codes, stdout). |
-| **F-1.5** | **Run Persistence** | Every execution must log `agent_id`, `task_id`, `tool_input`, `tool_output`, `duration`, and `status` to PostgreSQL. |
+| **F-1.5** | **Run Persistence** | Every execution must log to PostgreSQL tables: `eval_suites`, `eval_runs` (status: PENDING/COMPLETED/FAILED), `task_results` (status: PASS/FAIL/ERROR), `tool_calls` (sequence_number, tool_name, input_args, stdout_capture, exit_code, duration_ms), and `anomalies`. |
 
 ### 4.2 Phase 2 (Anomaly Detection)
 | ID | Requirement | Description |
 | :--- | :--- | :--- |
 | **F-2.1** | **Loop Detection** | System must flag/terminate runs that exceed a user-defined maximum tool-call count (e.g., >10 calls for one task). |
-| **F-2.2** | **Path Violation** | Detect and log attempts to write to paths outside the designated `/workspace` (e.g., attempts to modify `/etc/`). |
-| **F-2.3** | **Subprocess Monitor** | Flag the spawning of unexpected shell processes not explicitly defined in the tool's manifest. |
+| **F-2.2** | **Path Violation** | Block and log attempts to write to paths outside the designated `/workspace` (e.g., attempts to modify `/etc/`) as PATH anomalies in the `anomalies` table. |
+| **F-2.3** | **Subprocess Monitor** | Block and log spawning of unexpected shell processes as PROCESS anomalies in the `anomalies` table. |
 
 ### 4.3 Phase 3 (Metrics & Dashboard)
 | ID | Requirement | Description |
@@ -82,7 +82,7 @@ As autonomous agents transition from "chatbots" to "act-bots" (executing code, q
 ## 6. Success Metrics
 
 1.  **Resource Cleanup:** 100% of Docker containers created by the harness must be removed within 60 seconds of task completion/timeout.
-2.  **Scoring Accuracy:** 100% agreement between the Pytest assertion result and the database `pass/fail` status.
+2.  **Scoring Accuracy:** 100% agreement between the Pytest assertion result and the database `status` in the `task_results` table.
 3.  **Benchmarking Overhead:** The time taken to provision and teardown the sandbox should be $<25\%$ of the total task execution time.
 
 ---

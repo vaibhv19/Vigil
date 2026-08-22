@@ -16,24 +16,24 @@ erDiagram
 
     EVAL_SUITES {
         uuid id PK
-        string name
-        string agent_version
+        varchar name
+        varchar agent_version
         timestamp created_at
     }
 
     TASKS {
         uuid id PK
-        string slug "Unique identifier"
+        varchar slug "Unique identifier"
         text input_prompt
-        jsonb expected_output "Assertion logic"
+        jsonb expected_output "Assertion logic validated against Pydantic schema"
         integer max_steps
     }
 
     EVAL_RUNS {
         uuid id PK
         uuid suite_id FK
-        string status "PENDING/COMPLETED/FAILED"
-        float total_cost
+        varchar status "PENDING/COMPLETED/FAILED"
+        numeric total_cost
         integer total_duration_ms
         timestamp started_at
     }
@@ -42,7 +42,7 @@ erDiagram
         uuid id PK
         uuid run_id FK
         uuid task_id FK
-        string status "PASS/FAIL/ERROR"
+        varchar status "PASS/FAIL/ERROR"
         text final_output
         integer steps_taken
         timestamp finished_at
@@ -51,19 +51,21 @@ erDiagram
     TOOL_CALLS {
         uuid id PK
         uuid task_result_id FK
-        string tool_name
+        integer sequence_number
+        varchar tool_name
         jsonb input_args
         text stdout_capture
         integer exit_code
         integer duration_ms
+        timestamp created_at
     }
 
     ANOMALIES {
         uuid id PK
         uuid task_result_id FK
-        string pattern_type "LOOP/PATH/PROCESS"
-        string severity "WARNING/CRITICAL"
-        jsonb incident_data "Contextual snapshots"
+        varchar pattern_type "LOOP/PATH/PROCESS"
+        varchar severity "WARNING/CRITICAL"
+        jsonb incident_data
         timestamp detected_at
     }
 ```
@@ -75,32 +77,69 @@ erDiagram
 ### 1. `eval_suites`
 Groups multiple evaluation runs for regression testing.
 *   **Purpose:** Tracks a logical set of tests against a specific agent version or system prompt.
-*   **Key Fields:** `id`, `name`, `agent_version` (Git hash or semantic version).
+*   **Fields:**
+    *   `id` (UUID, PK): Unique identifier for the suite.
+    *   `name` (VARCHAR): Descriptive name of the suite.
+    *   `agent_version` (VARCHAR): Git commit hash or semantic version of the agent under test.
+    *   `created_at` (TIMESTAMP): Time the suite was registered.
 
 ### 2. `tasks`
 The immutable definition of an evaluation scenario.
 *   **Purpose:** Stores the "Gold Standard" prompt and the deterministic assertions required to pass.
-*   **Key Fields:** `input_prompt`, `expected_output` (JSONB containing assertion types like `file_exists` or `content_match`), `max_steps`.
+*   **Fields:**
+    *   `id` (UUID, PK): Unique identifier.
+    *   `slug` (VARCHAR): Unique slug/identifier for easy command-line references.
+    *   `input_prompt` (TEXT): The prompt text sent to the agent.
+    *   `expected_output` (JSONB): The assertion logic, validated against the Pydantic Discriminated Model defined in the Evaluation Harness Spec.
+    *   `max_steps` (INTEGER): Maximum allowed tool calls before failing.
 
 ### 3. `eval_runs`
 An instance of a suite execution.
 *   **Purpose:** High-level summary of a complete regression run.
-*   **Key Fields:** `status`, `total_cost` (calculated from token usage), `total_duration_ms`.
+*   **Fields:**
+    *   `id` (UUID, PK): Unique run identifier.
+    *   `suite_id` (UUID, FK): References `eval_suites(id)`.
+    *   `status` (VARCHAR): Lifecycle status. Allowed values: `PENDING`, `COMPLETED`, `FAILED`.
+    *   `total_cost` (NUMERIC): Aggregated monetary cost based on tokens used.
+    *   `total_duration_ms` (INTEGER): Total execution latency for the run.
+    *   `started_at` (TIMESTAMP): Starting timestamp.
 
 ### 4. `task_results`
 The outcome of a specific task within a run.
 *   **Purpose:** Records whether an agent successfully solved a specific prompt.
-*   **Key Fields:** `status` (PASS/FAIL/ERROR), `steps_taken` (number of tool calls used), `final_output` (the agent's text response).
+*   **Fields:**
+    *   `id` (UUID, PK): Unique result identifier.
+    *   `run_id` (UUID, FK): References `eval_runs(id)`.
+    *   `task_id` (UUID, FK): References `tasks(id)`.
+    *   `status` (VARCHAR): Assertion scoring outcome. Allowed values: `PASS`, `FAIL`, `ERROR`.
+    *   `final_output` (TEXT): The agent's final text response.
+    *   `steps_taken` (INTEGER): Total number of tool calls executed for the task.
+    *   `finished_at` (TIMESTAMP): Time the task completed.
 
 ### 5. `tool_calls`
 Granular logs of every interaction with the Docker SDK.
 *   **Purpose:** The core audit trail for Phase 1. Records exactly what the agent did inside the sandbox.
-*   **Key Fields:** `tool_name` (e.g., `python_exec`), `input_args` (code executed), `stdout_capture`, `exit_code`, `duration_ms`.
+*   **Fields:**
+    *   `id` (UUID, PK): Unique execution identifier.
+    *   `task_result_id` (UUID, FK): References `task_results(id)`.
+    *   `sequence_number` (INTEGER): 1-indexed ordering of tool executions within a task run.
+    *   `tool_name` (VARCHAR): The name of the tool called (e.g., `python_exec`).
+    *   `input_args` (JSONB): The raw arguments/code sent to the tool.
+    *   `stdout_capture` (TEXT): Combined stdout and stderr outputs.
+    *   `exit_code` (INTEGER): Process exit code from the sandbox.
+    *   `duration_ms` (INTEGER): Latency of the tool call execution.
+    *   `created_at` (TIMESTAMP): Execution timestamp.
 
 ### 6. `anomalies`
 Log of flagged patterns from the Phase 2 Execution Loop Tracker.
 *   **Purpose:** Captures security-relevant events that violated the safety scope.
-*   **Key Fields:** `pattern_type` (LOOP, PATH_VIOLATION, or PROCESS_SPAWN), `incident_data` (e.g., the specific blocked path the agent attempted to write to).
+*   **Fields:**
+    *   `id` (UUID, PK): Unique anomaly identifier.
+    *   `task_result_id` (UUID, FK): References `task_results(id)`.
+    *   `pattern_type` (VARCHAR): The type of violation. Allowed values: `LOOP`, `PATH`, `PROCESS`.
+    *   `severity` (VARCHAR): Violation impact level. Allowed values: `WARNING`, `CRITICAL`.
+    *   `incident_data` (JSONB): Structured details of the anomaly (e.g., the blocked command or filesystem target).
+    *   `detected_at` (TIMESTAMP): Time the anomaly was flagged.
 
 ---
 

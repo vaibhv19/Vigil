@@ -8,17 +8,17 @@
 
 ## MVP (Build First)
 
-*   **Isolated Ephemeral Runtime Sandbox** — Provisions unprivileged, containerized environments per agent tool call, with restricted filesystem access and capped resource limits (CPU/memory/time), torn down after each run.
-*   **Deterministic Evaluation Harness** — Programmatic regression runner: given an agent + a set of pre-defined tasks with known-correct outcomes, runs the agent against each and scores pass/fail — hard accuracy metrics, not vibes.
-*   **Run Logging** — Every sandboxed execution stored in PostgreSQL: what tool was called, what it did, pass/fail result, duration, cost.
-*   **Core Engineering** — Containers cleaned up reliably even on crash/timeout, clear pass/fail reporting per run.
+*   **Isolated Ephemeral Runtime Sandbox** — Provisions one ephemeral container per evaluation task, supporting multiple sequential tool calls within that container, destroyed after task completion/failure/timeout, with restricted filesystem access and capped resource limits (CPU/memory/time).
+*   **Deterministic Evaluation Harness** — Programmatic regression runner: given an agent + a set of pre-defined tasks with known-correct outcomes, runs the agent against each and scores them, saving final outcomes in `task_results.status` (`PASS`/`FAIL`/`ERROR`).
+*   **Run Logging** — Every execution logged to PostgreSQL tables: `eval_suites`, `eval_runs`, `task_results`, and `tool_calls` (sequence_number, tool_name, input_args, stdout_capture, exit_code, duration_ms).
+*   **Core Engineering** — Ephemeral containers cleaned up reliably even on crash/timeout, clear `status` reporting per task run.
 
 ---
 
 ## Phase 2 — Anomaly Detection
 *Scoped honestly, not "general escape detection"*
 
-*   **Tool Execution Loop Tracker** — Flags a defined, explicit set of concerning patterns: excessive repeated calls (loop detection by call-count/time), filesystem writes outside the sandboxed path, unexpected process spawning.
+*   **Tool Execution Loop Tracker** — Intercepts and blocks known risky patterns: excessive tool calls (LOOP), writing to paths outside `/workspace` (PATH), and spawning forbidden processes (PROCESS), logging them in the `anomalies` table.
 *   **Honest Scope Boundary** — Framed explicitly as "detects known risky patterns," not "detects all possible malicious behavior" — same as StudyLink's "local pickup only".
 
 ---
