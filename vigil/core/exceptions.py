@@ -29,3 +29,7 @@ class AgentExecutionError(VigilError):
 class DatabasePersistenceError(VigilError):
     """Raised when database connection, query execution, or persistence transactions fail."""
     pass
+
+class TaskTimeout(VigilError):
+    """Raised when a task execution exceeds its maximum duration limits."""
+    pass
