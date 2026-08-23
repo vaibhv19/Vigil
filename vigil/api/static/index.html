@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Vigil AI Agent Evaluation Dashboard — Monitor runs, compare agent versions, and track anomalies.">
+    <title>Vigil — Evaluation Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Sidebar Navigation -->
+    <aside id="sidebar" class="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">⛊</div>
+            <h1 class="brand-title">Vigil</h1>
+            <span class="brand-subtitle">Eval Dashboard</span>
+        </div>
+        <nav class="sidebar-nav">
+            <button class="nav-btn active" data-view="runs" id="nav-runs">
+                <span class="nav-icon">▶</span>
+                <span>Runs</span>
+            </button>
+            <button class="nav-btn" data-view="compare" id="nav-compare">
+                <span class="nav-icon">⇔</span>
+                <span>Compare</span>
+            </button>
+        </nav>
+        <div class="sidebar-footer">
+            <span class="version-tag">v1.0.0</span>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main id="main-content" class="main-content">
+        <!-- Runs View -->
+        <section id="view-runs" class="view active">
+            <header class="view-header">
+                <h2>Evaluation Runs</h2>
+                <p class="view-subtitle">Historical execution records and metrics</p>
+            </header>
+            <div id="runs-list" class="card-grid">
+                <div class="loading-spinner" id="runs-loader">
+                    <div class="spinner"></div>
+                    <p>Loading runs…</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Run Detail Panel -->
+        <section id="view-run-detail" class="view" style="display:none;">
+            <header class="view-header">
+                <button class="back-btn" id="btn-back-runs">← Back to Runs</button>
+                <h2 id="detail-title">Run Detail</h2>
+            </header>
+            <div class="detail-grid">
+                <div class="metrics-bar" id="detail-metrics"></div>
+                <div class="task-results-table" id="detail-tasks">
+                    <h3>Task Results</h3>
+                    <table id="tasks-table">
+                        <thead>
+                            <tr>
+                                <th>Task</th>
+                                <th>Status</th>
+                                <th>Steps</th>
+                                <th>Output</th>
+                                <th>Tools</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tasks-tbody"></tbody>
+                    </table>
+                </div>
+                <div class="anomalies-section" id="detail-anomalies">
+                    <h3>Anomalies</h3>
+                    <div id="anomalies-list"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Compare View -->
+        <section id="view-compare" class="view" style="display:none;">
+            <header class="view-header">
+                <h2>Compare Runs</h2>
+                <p class="view-subtitle">Side-by-side differential between two evaluation runs</p>
+            </header>
+            <div class="compare-controls">
+                <div class="select-group">
+                    <label for="select-run-a">Run A</label>
+                    <select id="select-run-a" class="styled-select"></select>
+                </div>
+                <span class="compare-vs">vs</span>
+                <div class="select-group">
+                    <label for="select-run-b">Run B</label>
+                    <select id="select-run-b" class="styled-select"></select>
+                </div>
+                <button class="btn-primary" id="btn-compare">Compare</button>
+            </div>
+            <div id="comparison-results" class="comparison-results"></div>
+        </section>
+
+        <!-- Tool Calls Modal -->
+        <div id="tools-modal" class="modal-overlay" style="display:none;">
+            <div class="modal-content glass-card">
+                <div class="modal-header">
+                    <h3>Tool Call Sequence</h3>
+                    <button class="modal-close" id="btn-close-modal">✕</button>
+                </div>
+                <div id="tools-modal-body" class="modal-body"></div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
