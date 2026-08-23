@@ -17,3 +17,7 @@ class ToolExecutionError(VigilError):
 class ToolTimeout(VigilError):
     """Raised when a tool execution exceeds its allotted time limit."""
     pass
+
+class TaskDefinitionValidationError(VigilError):
+    """Raised when a task or suite configuration is invalid."""
+    pass
