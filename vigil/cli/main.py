@@ -105,5 +105,13 @@ def status():
         )
     )
 
+@app.command(name="bootstrap")
+def bootstrap():
+    """
+    Evaluate system diagnostics checklist (Docker, DB, environment) to bootstrap local setups.
+    """
+    from vigil.cli.commands.bootstrap import run_bootstrap
+    run_bootstrap()
+
 if __name__ == "__main__":
     app()
