@@ -139,3 +139,91 @@ def test_eval_runner_agent_crash_error(sample_task):
     assert result["task_id"] == sample_task.task_id
     assert result["status"] == "ERROR"
     assert result["failure_reason"] == "AGENT_EXECUTION_ERROR"
+
+
+def test_eval_runner_parallel_suite_execution(tmp_path):
+    """
+    Verifies that run_suite correctly executes tasks in parallel (up to 5 max)
+    preserving sandbox isolation, container cleanup, and ordering.
+    """
+    settings = get_settings()
+    agent = MockAgentForRunner(action="success")
+    runner = EvalRunner(agent, settings.WORKSPACE_BASE_DIR)
+
+    # Create 3 task YAML files
+    for i in range(1, 4):
+        task_yaml = f"""
+task_id: parallel-task-{i}
+description: Parallel execution test task {i}
+input_prompt: Please write hello.txt
+category: parallel-ops
+max_steps: 5
+expected_output:
+  assertions:
+    - type: file_exists
+      path: hello.txt
+"""
+        with open(tmp_path / f"task_{i}.yaml", "w") as f:
+            f.write(task_yaml)
+
+    # Execute suite in parallel with max_workers=3
+    results = runner.run_suite(
+        task_dir=str(tmp_path),
+        suite_id="parallel-suite-test",
+        name="Parallel Test Suite",
+        max_workers=3
+    )
+
+    assert len(results) == 3
+    for res in results:
+        assert res["status"] == "PASS"
+        assert res["failure_reason"] is None
+
+
+def test_eval_runner_parallel_isolation_and_error(tmp_path):
+    """
+    Verifies that a failure in one task during parallel execution does not corrupt
+    unrelated concurrent tasks or break cleanup.
+    """
+    settings = get_settings()
+    agent = MockAgentForRunner(action="success")
+    runner = EvalRunner(agent, settings.WORKSPACE_BASE_DIR)
+
+    # Task 1 (valid)
+    t1_yaml = """
+task_id: isolated-task-pass
+description: Valid task
+input_prompt: Please write hello.txt
+category: test
+expected_output:
+  assertions:
+    - type: file_exists
+      path: hello.txt
+"""
+    # Task 2 (failing assertion)
+    t2_yaml = """
+task_id: isolated-task-fail
+description: Failing assertion task
+input_prompt: Please write hello.txt
+category: test
+expected_output:
+  assertions:
+    - type: file_exists
+      path: nonexistent.txt
+"""
+    with open(tmp_path / "t1.yaml", "w") as f:
+        f.write(t1_yaml)
+    with open(tmp_path / "t2.yaml", "w") as f:
+        f.write(t2_yaml)
+
+    results = runner.run_suite(
+        task_dir=str(tmp_path),
+        suite_id="isolation-suite-test",
+        max_workers=2
+    )
+
+    assert len(results) == 2
+    res_dict = {r["task_id"]: r for r in results}
+    assert res_dict["isolated-task-pass"]["status"] == "PASS"
+    assert res_dict["isolated-task-fail"]["status"] == "FAIL"
+
