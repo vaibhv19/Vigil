@@ -25,3 +25,7 @@ class TaskDefinitionValidationError(VigilError):
 class AgentExecutionError(VigilError):
     """Raised when the agent reasoning loop fails or crashes."""
     pass
+
+class DatabasePersistenceError(VigilError):
+    """Raised when database connection, query execution, or persistence transactions fail."""
+    pass
