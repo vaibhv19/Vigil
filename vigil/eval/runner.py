@@ -15,7 +15,9 @@ from vigil.core.exceptions import (
     TaskTimeout,
     AgentExecutionError,
     DatabasePersistenceError,
+    AnomalyException,
 )
+from vigil.core.anomaly_detector import AnomalyDetector
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +45,7 @@ class EvalRunner:
     Orchestrates the evaluation workflow lifecycle: provisioning sandboxes,
     injecting task context, executing agent reasoning loops, timing runs,
     scoring outcomes against state assertions, ensuring resource cleanup,
-    and persisting results to PostgreSQL.
+    persisting results to PostgreSQL, and checking for action anomalies.
     """
     def __init__(self, agent_adapter: BaseAgentAdapter, host_workspace_base: str):
         self.agent_adapter = agent_adapter
@@ -70,20 +72,45 @@ class EvalRunner:
         assertion_results = {}
         agent_response = ""
         
+        # 1. Initialize TaskResult in database first if run_id is active
+        db_result_id = None
+        if run_id:
+            from vigil.db.connection import get_session
+            from vigil.db.repository import VigilRepository
+            try:
+                with get_session() as session:
+                    db_task = VigilRepository.get_or_create_task(session, task)
+                    db_result = VigilRepository.create_task_result(
+                        session=session,
+                        run_id=run_id,
+                        task_id=db_task.id,
+                        status="RUNNING",
+                        steps_taken=0
+                    )
+                    db_result_id = db_result.id
+            except Exception as e:
+                logger.error(f"Failed to pre-register task result in DB: {e}")
+                if isinstance(e, DatabasePersistenceError):
+                    raise e
+                raise DatabasePersistenceError(f"Database pre-registration failed: {e}")
+
+        # 2. Instantiate AnomalyDetector
+        anomaly_detector = AnomalyDetector(task_result_id=db_result_id, max_tool_calls=task.max_steps)
+        
         start_time = time.perf_counter()
         
         try:
             # Execute within Sandbox lifecycle context manager
             with Sandbox(config, self.host_workspace_base, f"run-{task.task_id}") as manager:
-                # 1. Inject Context Files
+                # 3. Inject Context Files
                 from vigil.eval.task_loader import ContextInjector
                 ContextInjector.inject_context(manager.workspace_path, task)
                 
-                # 2. Setup ToolExecutor
+                # 4. Setup ToolExecutor with AnomalyDetector registered
                 from vigil.core.tool_executor import ToolExecutor
-                tool_executor = ToolExecutor(manager)
+                tool_executor = ToolExecutor(manager, anomaly_detector=anomaly_detector)
                 
-                # 3. Invoke Agent with task timeout guard
+                # 5. Invoke Agent with task timeout guard
                 try:
                     agent_thread = TaskExecThread(self.agent_adapter, task.input_prompt, tool_executor)
                     agent_thread.start()
@@ -102,6 +129,24 @@ class EvalRunner:
                         failure_reason = "TOOL_TIMEOUT"
                     elif isinstance(e, TaskTimeout):
                         failure_reason = "TASK_TIMEOUT"
+                    elif isinstance(e, AnomalyException):
+                        failure_reason = "LOOP_DETECTED" if e.pattern_type == "LOOP" else f"{e.pattern_type}_VIOLATION"
+                        
+                        # Commit Anomaly record to database immediately
+                        if db_result_id:
+                            from vigil.db.connection import get_session
+                            from vigil.db.repository import VigilRepository
+                            try:
+                                with get_session() as session:
+                                    VigilRepository.create_anomaly(
+                                        session=session,
+                                        task_result_id=db_result_id,
+                                        pattern_type=e.pattern_type,
+                                        severity=e.severity,
+                                        incident_data=e.incident_data
+                                    )
+                            except Exception as db_err:
+                                logger.error(f"Failed to log anomaly to database: {db_err}")
                     elif isinstance(e, AgentExecutionError):
                         failure_reason = "AGENT_EXECUTION_ERROR"
                     else:
@@ -112,7 +157,7 @@ class EvalRunner:
                 # Cache tool executions
                 tool_calls = tool_executor.tool_calls
                 
-                # 4. Scoring assertions
+                # 6. Scoring assertions
                 from vigil.eval.scoring_engine import ScoringEngine
                 assertions = task.expected_output.get("assertions", [])
                 
@@ -138,6 +183,9 @@ class EvalRunner:
         except TaskTimeout as e:
             status = "ERROR"
             failure_reason = "TASK_TIMEOUT"
+        except AnomalyException as e:
+            status = "FAIL"
+            failure_reason = "LOOP_DETECTED" if e.pattern_type == "LOOP" else f"{e.pattern_type}_VIOLATION"
         except AgentExecutionError as e:
             status = "ERROR"
             failure_reason = "AGENT_EXECUTION_ERROR"
@@ -159,29 +207,29 @@ class EvalRunner:
             "assertion_results": assertion_results
         }
         
-        # 5. Persist task run details to database if run_id is active
-        if run_id:
+        # 7. Finalize/Update task run details in database if db_result_id is active
+        if db_result_id:
             from vigil.db.connection import get_session
             from vigil.db.repository import VigilRepository
             
             try:
                 with get_session() as session:
-                    db_task = VigilRepository.get_or_create_task(session, task)
-                    db_result = VigilRepository.create_task_result(
+                    # Update TaskResult record status and telemetry metrics
+                    VigilRepository.update_task_result(
                         session=session,
-                        run_id=run_id,
-                        task_id=db_task.id,
+                        task_result_id=db_result_id,
                         status=status,
                         steps_taken=len(tool_calls),
                         failure_reason=failure_reason,
                         final_output=agent_response
                     )
                     
+                    # Create individual ToolCall rows
                     for call in tool_calls:
                         input_args = {"command": call.arguments} if hasattr(call, "arguments") else {}
                         VigilRepository.create_tool_call(
                             session=session,
-                            task_result_id=db_result.id,
+                            task_result_id=db_result_id,
                             sequence_number=call.sequence_number,
                             tool_name=call.tool_name,
                             input_args=input_args,
@@ -190,10 +238,10 @@ class EvalRunner:
                             duration_ms=call.duration_ms
                         )
             except Exception as e:
-                logger.error(f"Failed database persistence write operations: {e}")
+                logger.error(f"Failed database persistence finalization operations: {e}")
                 if isinstance(e, DatabasePersistenceError):
                     raise e
-                raise DatabasePersistenceError(f"Database operation failed during run: {e}")
+                raise DatabasePersistenceError(f"Database finalization failed during run: {e}")
                 
         return result_payload
 
@@ -252,7 +300,7 @@ class EvalRunner:
                         
                     res = self.run_task(task_def, run_id=run_id)
                     results.append(res)
-                    if res["status"] == "ERROR":
+                    if res["status"] in ["ERROR", "FAIL"]:
                         suite_status = "FAILED"
                 except DatabasePersistenceError:
                     suite_status = "FAILED"
