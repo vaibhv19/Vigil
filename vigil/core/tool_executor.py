@@ -1,7 +1,7 @@
 import time
 import logging
 import threading
-from typing import Optional
+from typing import Any, Optional
 
 from vigil.core.sandbox_manager import SandboxManager
 from vigil.core.tool_models import ToolRequest, ToolResult
