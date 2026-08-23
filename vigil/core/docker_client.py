@@ -2,13 +2,7 @@ import docker
 from functools import lru_cache
 from vigil.config import get_settings
 
-class SandboxProvisionError(Exception):
-    """Raised when container provisioning fails."""
-    pass
-
-class SandboxTeardownError(Exception):
-    """Raised when container teardown fails."""
-    pass
+from vigil.core.exceptions import SandboxProvisionError, SandboxTeardownError
 
 @lru_cache()
 def get_docker_client() -> docker.DockerClient:

@@ -7,7 +7,8 @@ import docker
 from docker.errors import NotFound, APIError
 
 from vigil.core.sandbox_config import SandboxConfig
-from vigil.core.docker_client import get_docker_client, SandboxProvisionError, SandboxTeardownError
+from vigil.core.docker_client import get_docker_client
+from vigil.core.exceptions import SandboxProvisionError, SandboxTeardownError
 from vigil.core.workspace_factory import WorkspaceFactory
 
 logger = logging.getLogger(__name__)
