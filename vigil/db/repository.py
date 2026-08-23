@@ -102,6 +102,28 @@ class VigilRepository:
         return result
 
     @staticmethod
+    def update_task_result(
+        session: Session,
+        task_result_id: uuid.UUID,
+        status: str,
+        steps_taken: int,
+        failure_reason: Optional[str] = None,
+        final_output: Optional[str] = None
+    ) -> TaskResult:
+        stmt = select(TaskResult).where(TaskResult.id == task_result_id)
+        result = session.scalar(stmt)
+        if not result:
+            raise ValueError(f"TaskResult not found: {task_result_id}")
+        result.status = status
+        result.steps_taken = steps_taken
+        result.failure_reason = failure_reason
+        result.final_output = final_output
+        result.finished_at = datetime.now(timezone.utc)
+        session.add(result)
+        session.flush()
+        return result
+
+    @staticmethod
     def create_tool_call(
         session: Session,
         task_result_id: uuid.UUID,
