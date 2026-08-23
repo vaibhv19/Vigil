@@ -49,8 +49,9 @@ class ToolExecutor:
     """
     Handles intercepting, timing, and routing commands to the running Docker container.
     """
-    def __init__(self, sandbox_manager: SandboxManager):
+    def __init__(self, sandbox_manager: SandboxManager, anomaly_detector: Optional[Any] = None):
         self.sandbox_manager = sandbox_manager
+        self.anomaly_detector = anomaly_detector
         self._tool_calls = []
         self._sequence_number = 0
 
@@ -65,6 +66,10 @@ class ToolExecutor:
         """
         Executes a command inside the running sandbox container with sub-timeout guards.
         """
+        # Intercept and validate request prior to container execution
+        if self.anomaly_detector:
+            self.anomaly_detector.inspect_request(request)
+
         self._sequence_number += 1
         seq = self._sequence_number
         tool_name = request.tool_name
