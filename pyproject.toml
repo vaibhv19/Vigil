@@ -18,6 +18,9 @@ click = "<8.2.0"
 jsonschema = "^4.22.0"
 langgraph = "^0.1.0"
 langchain-core = "^0.2.0"
+sqlalchemy = "^2.0.29"
+alembic = "^1.13.1"
+psycopg2-binary = "^2.9.9"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "8.2.0"
