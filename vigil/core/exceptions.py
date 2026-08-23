@@ -33,3 +33,11 @@ class DatabasePersistenceError(VigilError):
 class TaskTimeout(VigilError):
     """Raised when a task execution exceeds its maximum duration limits."""
     pass
+
+class AnomalyException(VigilError):
+    """Raised when the anomaly detection monitors flag a safety violation."""
+    def __init__(self, pattern_type: str, severity: str, incident_data: dict, message: str = None):
+        super().__init__(message or f"Vigil anomaly detected: {pattern_type} ({severity})")
+        self.pattern_type = pattern_type
+        self.severity = severity
+        self.incident_data = incident_data
