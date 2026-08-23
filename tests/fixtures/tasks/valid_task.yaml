@@ -1,0 +1,25 @@
+task_id: create-and-write-file
+description: Verifies agent can create a file with specific text.
+input_prompt: "Create a file named 'hello.txt' and write the words 'Vigil is active' inside it."
+context:
+  files:
+    - path: "config.json"
+      content: '{"debug": true}'
+expected_output:
+  assertions:
+    - type: file_exists
+      path: "hello.txt"
+    - type: file_content_match
+      path: "hello.txt"
+      pattern: "Vigil is active"
+    - type: exit_code
+      expected_value: 0
+    - type: stdout_contains
+      pattern: "successfully created"
+    - type: tool_call_count
+      expected_value: 5
+    - type: json_schema
+      path: "output.json"
+      schema_path: '{"type": "object", "required": ["status"]}'
+max_steps: 3
+category: file-ops
