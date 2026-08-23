@@ -21,3 +21,7 @@ class ToolTimeout(VigilError):
 class TaskDefinitionValidationError(VigilError):
     """Raised when a task or suite configuration is invalid."""
     pass
+
+class AgentExecutionError(VigilError):
+    """Raised when the agent reasoning loop fails or crashes."""
+    pass
