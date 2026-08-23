@@ -16,6 +16,8 @@ rich = "^13.7.1"
 docker = "7.1.0"
 click = "<8.2.0"
 jsonschema = "^4.22.0"
+langgraph = "^0.1.0"
+langchain-core = "^0.2.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "8.2.0"
