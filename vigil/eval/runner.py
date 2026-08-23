@@ -250,17 +250,23 @@ class EvalRunner:
         task_dir: str, 
         suite_id: str = "suite-run", 
         name: str = "Suite Run", 
-        agent_version: str = "develop"
+        agent_version: str = "develop",
+        max_workers: int = 1
     ) -> list[dict[str, Any]]:
         """
-        Loads and runs all YAML task definitions inside a target folder sequentially.
+        Loads and runs all YAML task definitions inside a target folder.
+        Supports parallel execution up to 5 concurrent task workers (PRD §5).
         Saves execution telemetry and logs results to PostgreSQL.
         """
         from vigil.db.connection import get_session
         from vigil.db.repository import VigilRepository
         from vigil.eval.task_loader import TaskLoader
         import glob
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         
+        # Enforce maximum concurrency cap of 5 as mandated by PRD §5
+        workers = max(1, min(max_workers, 5))
+
         # 1. Initialize Database Run Metadata
         run_id = None
         db_suite_id = None
@@ -271,7 +277,8 @@ class EvalRunner:
                 execution_config = {
                     "agent_version": agent_version,
                     "task_dir": task_dir,
-                    "suite_id": suite_id
+                    "suite_id": suite_id,
+                    "max_workers": workers
                 }
                 db_run = VigilRepository.create_eval_run(session, db_suite.id, execution_config)
                 run_id = db_run.id
@@ -288,36 +295,57 @@ class EvalRunner:
         results = []
         suite_status = "COMPLETED"
         start_time = time.perf_counter()
+
+        def _execute_task_file(idx_and_file: tuple[int, str]) -> tuple[int, dict[str, Any]]:
+            idx, yaml_file = idx_and_file
+            try:
+                task_def = TaskLoader.load_task(yaml_file)
+                
+                with get_session() as session:
+                    db_task = VigilRepository.get_or_create_task(session, task_def)
+                    VigilRepository.associate_task_with_suite(session, db_suite_id, db_task.id, idx)
+                    
+                res = self.run_task(task_def, run_id=run_id)
+                return idx, res
+            except DatabasePersistenceError:
+                raise
+            except Exception as e:
+                logger.error(f"Failed to load or execute task file {yaml_file}: {e}")
+                err_res = {
+                    "task_id": os.path.basename(yaml_file),
+                    "status": "ERROR",
+                    "failure_reason": "TASK_DEFINITION_VALIDATION_ERROR",
+                    "error_details": str(e),
+                    "duration_ms": 0,
+                    "agent_response": "",
+                    "tool_calls": [],
+                    "assertion_results": {}
+                }
+                return idx, err_res
         
         try:
-            for idx, yaml_file in enumerate(yaml_files, start=1):
-                try:
-                    task_def = TaskLoader.load_task(yaml_file)
-                    
-                    with get_session() as session:
-                        db_task = VigilRepository.get_or_create_task(session, task_def)
-                        VigilRepository.associate_task_with_suite(session, db_suite_id, db_task.id, idx)
-                        
-                    res = self.run_task(task_def, run_id=run_id)
-                    results.append(res)
-                    if res["status"] in ["ERROR", "FAIL"]:
-                        suite_status = "FAILED"
-                except DatabasePersistenceError:
+            indexed_files = list(enumerate(yaml_files, start=1))
+            
+            if workers == 1:
+                # Sequential execution path
+                indexed_results = [_execute_task_file(item) for item in indexed_files]
+            else:
+                # Parallel execution path using ThreadPoolExecutor capped at workers (max 5)
+                logger.info(f"Executing suite {suite_id} with {workers} parallel workers")
+                indexed_results = []
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    future_to_item = {executor.submit(_execute_task_file, item): item for item in indexed_files}
+                    for future in as_completed(future_to_item):
+                        indexed_results.append(future.result())
+            
+            # Sort results by original task index for deterministic reporting order
+            indexed_results.sort(key=lambda x: x[0])
+            results = [res for _, res in indexed_results]
+
+            for res in results:
+                if res["status"] in ["ERROR", "FAIL"]:
                     suite_status = "FAILED"
-                    raise
-                except Exception as e:
-                    logger.error(f"Failed to load or execute task file {yaml_file}: {e}")
-                    results.append({
-                        "task_id": os.path.basename(yaml_file),
-                        "status": "ERROR",
-                        "failure_reason": "TASK_DEFINITION_VALIDATION_ERROR",
-                        "error_details": str(e),
-                        "duration_ms": 0,
-                        "agent_response": "",
-                        "tool_calls": [],
-                        "assertion_results": {}
-                    })
-                    suite_status = "FAILED"
+
         finally:
             # 2. Finalize Database Run record
             duration_ms = int((time.perf_counter() - start_time) * 1000)
@@ -332,3 +360,4 @@ class EvalRunner:
                     raise e
                     
         return results
+
