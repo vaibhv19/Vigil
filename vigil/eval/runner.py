@@ -1,7 +1,8 @@
 import logging
 import os
 import time
-from typing import Any, List
+import uuid
+from typing import Any, List, Optional
 
 from vigil.agents.base_adapter import BaseAgentAdapter
 from vigil.eval.task_models import TaskDefinition
@@ -11,6 +12,7 @@ from vigil.core.exceptions import (
     SandboxTeardownError,
     ToolTimeout,
     AgentExecutionError,
+    DatabasePersistenceError,
 )
 
 logger = logging.getLogger(__name__)
@@ -19,16 +21,18 @@ class EvalRunner:
     """
     Orchestrates the evaluation workflow lifecycle: provisioning sandboxes,
     injecting task context, executing agent reasoning loops, timing runs,
-    scoring outcomes against state assertions, and ensuring resource cleanup.
+    scoring outcomes against state assertions, ensuring resource cleanup,
+    and persisting results to PostgreSQL.
     """
     def __init__(self, agent_adapter: BaseAgentAdapter, host_workspace_base: str):
         self.agent_adapter = agent_adapter
         self.host_workspace_base = host_workspace_base
 
-    def run_task(self, task: TaskDefinition) -> dict[str, Any]:
+    def run_task(self, task: TaskDefinition, run_id: Optional[uuid.UUID] = None) -> dict[str, Any]:
         """
         Orchestrates sandbox startup, context injection, agent execution,
         assertion scoring, and teardown. Guarantees cleanup on failure.
+        Saves execution results to DB if run_id is supplied.
         """
         from vigil.core.sandbox_config import SandboxConfig
         
@@ -103,7 +107,7 @@ class EvalRunner:
                 
         duration_ms = int((time.perf_counter() - start_time) * 1000)
         
-        return {
+        result_payload = {
             "task_id": task.task_id,
             "status": status,
             "failure_reason": failure_reason,
@@ -112,36 +116,138 @@ class EvalRunner:
             "tool_calls": tool_calls,
             "assertion_results": assertion_results
         }
+        
+        # 5. Persist task run details to database if run_id is active
+        if run_id:
+            from vigil.db.connection import get_session
+            from vigil.db.repository import VigilRepository
+            
+            try:
+                with get_session() as session:
+                    # Resolve or save current Task schema definition
+                    db_task = VigilRepository.get_or_create_task(session, task)
+                    
+                    # Create TaskResult record
+                    db_result = VigilRepository.create_task_result(
+                        session=session,
+                        run_id=run_id,
+                        task_id=db_task.id,
+                        status=status,
+                        steps_taken=len(tool_calls),
+                        failure_reason=failure_reason,
+                        final_output=agent_response
+                    )
+                    
+                    # Save individual ToolCall records
+                    for call in tool_calls:
+                        input_args = {"command": call.arguments} if hasattr(call, "arguments") else {}
+                        VigilRepository.create_tool_call(
+                            session=session,
+                            task_result_id=db_result.id,
+                            sequence_number=call.sequence_number,
+                            tool_name=call.tool_name,
+                            input_args=input_args,
+                            stdout_capture=call.stdout,
+                            exit_code=call.exit_code,
+                            duration_ms=call.duration_ms
+                        )
+            except Exception as e:
+                logger.error(f"Failed database persistence write operations: {e}")
+                # Propagate as DatabasePersistenceError to abort the active suite execution
+                if isinstance(e, DatabasePersistenceError):
+                    raise e
+                raise DatabasePersistenceError(f"Database operation failed during run: {e}")
+                
+        return result_payload
 
-    def run_suite(self, task_dir: str) -> list[dict[str, Any]]:
+    def run_suite(
+        self, 
+        task_dir: str, 
+        suite_id: str = "suite-run", 
+        name: str = "Suite Run", 
+        agent_version: str = "develop"
+    ) -> list[dict[str, Any]]:
         """
         Loads and runs all YAML task definitions inside a target folder sequentially.
+        Saves execution telemetry and logs results to PostgreSQL.
         """
+        from vigil.db.connection import get_session
+        from vigil.db.repository import VigilRepository
         from vigil.eval.task_loader import TaskLoader
         import glob
         
+        # 1. Initialize Database Run Metadata
+        run_id = None
+        db_suite_id = None
+        try:
+            with get_session() as session:
+                db_suite = VigilRepository.get_or_create_suite(session, name, agent_version)
+                db_suite_id = db_suite.id
+                execution_config = {
+                    "agent_version": agent_version,
+                    "task_dir": task_dir,
+                    "suite_id": suite_id
+                }
+                db_run = VigilRepository.create_eval_run(session, db_suite.id, execution_config)
+                run_id = db_run.id
+        except Exception as e:
+            logger.error(f"Failed to initialize database run: {e}")
+            if isinstance(e, DatabasePersistenceError):
+                raise e
+            raise DatabasePersistenceError(f"Database initialization failed: {e}")
+            
         yaml_files = glob.glob(os.path.join(task_dir, "**/*.yaml"), recursive=True) + \
                      glob.glob(os.path.join(task_dir, "**/*.yml"), recursive=True)
                      
         yaml_files.sort()
         results = []
+        suite_status = "COMPLETED"
+        start_time = time.perf_counter()
         
-        for yaml_file in yaml_files:
-            try:
-                task_def = TaskLoader.load_task(yaml_file)
-                logger.info(f"Loaded task {task_def.task_id} from {yaml_file}")
-                res = self.run_task(task_def)
-                results.append(res)
-            except Exception as e:
-                logger.error(f"Failed to load or execute task file {yaml_file}: {e}")
-                results.append({
-                    "task_id": os.path.basename(yaml_file),
-                    "status": "ERROR",
-                    "failure_reason": "TASK_DEFINITION_VALIDATION_ERROR",
-                    "error_details": str(e),
-                    "duration_ms": 0,
-                    "agent_response": "",
-                    "tool_calls": [],
-                    "assertion_results": {}
-                })
+        try:
+            for idx, yaml_file in enumerate(yaml_files, start=1):
+                try:
+                    task_def = TaskLoader.load_task(yaml_file)
+                    
+                    # Associate Task with Suite in DB before execution
+                    with get_session() as session:
+                        db_task = VigilRepository.get_or_create_task(session, task_def)
+                        VigilRepository.associate_task_with_suite(session, db_suite_id, db_task.id, idx)
+                        
+                    # Execute Task and write results
+                    res = self.run_task(task_def, run_id=run_id)
+                    results.append(res)
+                    if res["status"] == "ERROR":
+                        suite_status = "FAILED"
+                except DatabasePersistenceError:
+                    # Propagate DB failures directly to abort subsequent executions
+                    suite_status = "FAILED"
+                    raise
+                except Exception as e:
+                    logger.error(f"Failed to load or execute task file {yaml_file}: {e}")
+                    results.append({
+                        "task_id": os.path.basename(yaml_file),
+                        "status": "ERROR",
+                        "failure_reason": "TASK_DEFINITION_VALIDATION_ERROR",
+                        "error_details": str(e),
+                        "duration_ms": 0,
+                        "agent_response": "",
+                        "tool_calls": [],
+                        "assertion_results": {}
+                    })
+                    suite_status = "FAILED"
+        finally:
+            # 2. Finalize Database Run record
+            duration_ms = int((time.perf_counter() - start_time) * 1000)
+            if run_id:
+                try:
+                    with get_session() as session:
+                        VigilRepository.update_eval_run(session, run_id, suite_status, duration_ms)
+                except Exception as e:
+                    logger.error(f"Failed to update database run finalization: {e}")
+                    # If updating the run finalization fails, raise DatabasePersistenceError
+                    if not isinstance(e, DatabasePersistenceError):
+                        raise DatabasePersistenceError(f"Database finalization failed: {e}")
+                    raise e
+                    
         return results
