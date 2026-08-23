@@ -56,6 +56,8 @@ def _cleanup_active_containers(signum, frame):
                 container.remove(v=True, force=True)
         except Exception as e:
             logger.error(f"Failed to emergency clean container {cid}: {e}")
+        finally:
+            ActiveContainerRegistry.unregister(cid)
     sys.exit(128 + signum)
 
 def register_signal_handlers():

@@ -2,6 +2,7 @@ import logging
 import os
 import time
 import uuid
+import threading
 from typing import Any, List, Optional
 
 from vigil.agents.base_adapter import BaseAgentAdapter
@@ -11,11 +12,31 @@ from vigil.core.exceptions import (
     SandboxProvisionError,
     SandboxTeardownError,
     ToolTimeout,
+    TaskTimeout,
     AgentExecutionError,
     DatabasePersistenceError,
 )
 
 logger = logging.getLogger(__name__)
+
+class TaskExecThread(threading.Thread):
+    """
+    Thread to run the agent task execution loop, allowing us to enforce task-level timeouts.
+    """
+    def __init__(self, agent_adapter: BaseAgentAdapter, prompt: str, tool_executor: Any):
+        super().__init__()
+        self.agent_adapter = agent_adapter
+        self.prompt = prompt
+        self.tool_executor = tool_executor
+        self.result = None
+        self.exception = None
+        
+    def run(self):
+        try:
+            self.result = self.agent_adapter.run_task(self.prompt, self.tool_executor)
+        except Exception as e:
+            self.exception = e
+
 
 class EvalRunner:
     """
@@ -28,7 +49,12 @@ class EvalRunner:
         self.agent_adapter = agent_adapter
         self.host_workspace_base = host_workspace_base
 
-    def run_task(self, task: TaskDefinition, run_id: Optional[uuid.UUID] = None) -> dict[str, Any]:
+    def run_task(
+        self, 
+        task: TaskDefinition, 
+        run_id: Optional[uuid.UUID] = None, 
+        timeout_seconds: int = 300
+    ) -> dict[str, Any]:
         """
         Orchestrates sandbox startup, context injection, agent execution,
         assertion scoring, and teardown. Guarantees cleanup on failure.
@@ -57,12 +83,25 @@ class EvalRunner:
                 from vigil.core.tool_executor import ToolExecutor
                 tool_executor = ToolExecutor(manager)
                 
-                # 3. Invoke Agent
+                # 3. Invoke Agent with task timeout guard
                 try:
-                    agent_response = self.agent_adapter.run_task(task.input_prompt, tool_executor)
+                    agent_thread = TaskExecThread(self.agent_adapter, task.input_prompt, tool_executor)
+                    agent_thread.start()
+                    agent_thread.join(timeout=timeout_seconds)
+                    
+                    if agent_thread.is_alive():
+                        logger.warning(f"Task {task.task_id} timed out after {timeout_seconds}s. Terminating container...")
+                        raise TaskTimeout(f"Task execution exceeded timeout limit of {timeout_seconds} seconds.")
+                        
+                    if agent_thread.exception:
+                        raise agent_thread.exception
+                        
+                    agent_response = agent_thread.result
                 except Exception as e:
                     if isinstance(e, ToolTimeout):
                         failure_reason = "TOOL_TIMEOUT"
+                    elif isinstance(e, TaskTimeout):
+                        failure_reason = "TASK_TIMEOUT"
                     elif isinstance(e, AgentExecutionError):
                         failure_reason = "AGENT_EXECUTION_ERROR"
                     else:
@@ -96,6 +135,9 @@ class EvalRunner:
         except ToolTimeout as e:
             status = "ERROR"
             failure_reason = "TOOL_TIMEOUT"
+        except TaskTimeout as e:
+            status = "ERROR"
+            failure_reason = "TASK_TIMEOUT"
         except AgentExecutionError as e:
             status = "ERROR"
             failure_reason = "AGENT_EXECUTION_ERROR"
@@ -124,10 +166,7 @@ class EvalRunner:
             
             try:
                 with get_session() as session:
-                    # Resolve or save current Task schema definition
                     db_task = VigilRepository.get_or_create_task(session, task)
-                    
-                    # Create TaskResult record
                     db_result = VigilRepository.create_task_result(
                         session=session,
                         run_id=run_id,
@@ -138,7 +177,6 @@ class EvalRunner:
                         final_output=agent_response
                     )
                     
-                    # Save individual ToolCall records
                     for call in tool_calls:
                         input_args = {"command": call.arguments} if hasattr(call, "arguments") else {}
                         VigilRepository.create_tool_call(
@@ -153,7 +191,6 @@ class EvalRunner:
                         )
             except Exception as e:
                 logger.error(f"Failed database persistence write operations: {e}")
-                # Propagate as DatabasePersistenceError to abort the active suite execution
                 if isinstance(e, DatabasePersistenceError):
                     raise e
                 raise DatabasePersistenceError(f"Database operation failed during run: {e}")
@@ -209,18 +246,15 @@ class EvalRunner:
                 try:
                     task_def = TaskLoader.load_task(yaml_file)
                     
-                    # Associate Task with Suite in DB before execution
                     with get_session() as session:
                         db_task = VigilRepository.get_or_create_task(session, task_def)
                         VigilRepository.associate_task_with_suite(session, db_suite_id, db_task.id, idx)
                         
-                    # Execute Task and write results
                     res = self.run_task(task_def, run_id=run_id)
                     results.append(res)
                     if res["status"] == "ERROR":
                         suite_status = "FAILED"
                 except DatabasePersistenceError:
-                    # Propagate DB failures directly to abort subsequent executions
                     suite_status = "FAILED"
                     raise
                 except Exception as e:
@@ -245,7 +279,6 @@ class EvalRunner:
                         VigilRepository.update_eval_run(session, run_id, suite_status, duration_ms)
                 except Exception as e:
                     logger.error(f"Failed to update database run finalization: {e}")
-                    # If updating the run finalization fails, raise DatabasePersistenceError
                     if not isinstance(e, DatabasePersistenceError):
                         raise DatabasePersistenceError(f"Database finalization failed: {e}")
                     raise e
