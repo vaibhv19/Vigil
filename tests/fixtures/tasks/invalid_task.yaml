@@ -1,0 +1,6 @@
+task_id: invalid-task-def
+description: This has invalid properties.
+input_prompt: "Write output"
+# Missing expected_output entirely!
+max_steps: -5  # Must be >= 1!
+category: test

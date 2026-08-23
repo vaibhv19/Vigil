@@ -1,0 +1,35 @@
+[tool.poetry]
+name = "vigil"
+version = "0.1.0"
+description = "Autonomous Agent Evaluation Harness & Safe-Runtime Sandbox"
+authors = ["Vaibhav Gupta <vaibhv19@github.com>"]
+readme = "README.md"
+packages = [{include = "vigil"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pydantic = "^2.7.0"
+pydantic-settings = "^2.2.1"
+pyyaml = "^6.0.1"
+typer = "^0.12.0"
+rich = "^13.7.1"
+docker = "7.1.0"
+click = "<8.2.0"
+jsonschema = "^4.22.0"
+langgraph = "^0.1.0"
+langchain-core = "^0.2.0"
+sqlalchemy = "^2.0.29"
+alembic = "^1.13.1"
+psycopg2-binary = "^2.9.9"
+fastapi = "0.111.0"
+uvicorn = {version = ">=0.29.0", extras = ["standard"]}
+
+[tool.poetry.group.dev.dependencies]
+pytest = "8.2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+vigil = "vigil.cli.main:app"

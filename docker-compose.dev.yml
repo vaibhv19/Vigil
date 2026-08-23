@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: vigil-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: vigil_user
+      POSTGRES_PASSWORD: vigil_secure_pass
+      POSTGRES_DB: vigil_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - vigil_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  vigil_postgres_data:
+    driver: local
