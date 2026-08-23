@@ -105,6 +105,55 @@ def status():
         )
     )
 
+@app.command(name="run")
+def run(
+    suite: str = typer.Option(..., "--suite", "-s", help="Path to a directory of YAML task definitions."),
+    name: str = typer.Option("Suite Run", "--name", "-n", help="Descriptive name for this suite run."),
+    agent_version: str = typer.Option("develop", "--agent-version", "-v", help="Agent version tag for tracking."),
+    model_provider: str = typer.Option("openai", "--provider", help="LLM provider (openai)."),
+    model_name: str = typer.Option("gpt-4o-mini", "--model", help="LLM model name."),
+):
+    """
+    Execute an evaluation suite against an agent inside sandboxed containers.
+    """
+    import os
+    from vigil.agents.langgraph_adapter import LangGraphAgentAdapter
+    from vigil.eval.runner import EvalRunner
+    from vigil.eval.reporter import VigilEvalReporter
+
+    if not os.path.isdir(suite):
+        console.print(f"[bold red]Error:[/bold red] Suite directory not found: {suite}")
+        raise typer.Exit(code=1)
+
+    try:
+        settings = get_settings()
+    except Exception as e:
+        console.print(f"[bold red]Configuration Error:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+    console.print(f"[bold blue]Starting Vigil evaluation...[/bold blue]")
+    console.print(f"  Suite: [yellow]{suite}[/yellow]")
+    console.print(f"  Name: [yellow]{name}[/yellow]")
+    console.print(f"  Agent Version: [yellow]{agent_version}[/yellow]")
+    console.print(f"  Model: [yellow]{model_provider}/{model_name}[/yellow]\n")
+
+    adapter = LangGraphAgentAdapter(model_provider=model_provider, model_name=model_name)
+    runner = EvalRunner(agent_adapter=adapter, host_workspace_base=settings.WORKSPACE_BASE_DIR)
+
+    try:
+        results = runner.run_suite(
+            task_dir=suite,
+            suite_id=f"{name}-{agent_version}",
+            name=name,
+            agent_version=agent_version,
+        )
+    except Exception as e:
+        console.print(f"[bold red]Evaluation failed:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+    reporter = VigilEvalReporter()
+    reporter.generate_report(suite_id=f"{name}-{agent_version}", results=results)
+
 @app.command(name="bootstrap")
 def bootstrap():
     """

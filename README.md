@@ -76,13 +76,11 @@ cp .env.example .env
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `VIGIL_DATABASE_URL` | PostgreSQL connection string | `postgresql://vigil:vigil@localhost:5432/vigil` |
-| `VIGIL_DOCKER_HOST` | Docker daemon URL | `npipe:////./pipe/docker_engine` (Windows) |
-| `VIGIL_SANDBOX_IMAGE` | Base Docker image for sandboxes | `python:3.12-slim` |
-| `VIGIL_DEFAULT_CPU_LIMIT` | CPU core limit per sandbox | `1.0` |
-| `VIGIL_DEFAULT_MEMORY_LIMIT` | Memory limit per sandbox | `512m` |
-| `VIGIL_NETWORK_DISABLED` | Disable network inside sandbox | `true` |
-| `VIGIL_MAX_TOOL_CALLS` | Maximum tool invocations per task | `25` |
+| `DATABASE_URL` | PostgreSQL connection string | *(Required)* |
+| `DOCKER_HOST_URL` | Docker daemon URL | `unix:///var/run/docker.sock` |
+| `WORKSPACE_BASE_DIR` | Absolute host path for temp workspaces | *(Required)* |
+| `ENV` | Application environment | `development` |
+| `LOG_LEVEL` | Logging level | `INFO` |
 
 ### Database Setup
 
@@ -97,8 +95,8 @@ poetry run vigil bootstrap
 ### Running an Evaluation
 
 ```bash
-# Execute a suite definition
-poetry run vigil run --suite path/to/suite.yaml
+# Execute a suite of evaluation tasks
+poetry run vigil run --suite path/to/tasks/ --name "My Suite" --agent-version v1.0
 
 # Start the dashboard
 poetry run uvicorn vigil.api.main:app --reload
