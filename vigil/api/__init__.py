@@ -1,1 +1,1 @@
-# REST API package
+# Vigil API module
