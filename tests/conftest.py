@@ -25,3 +25,17 @@ def test_settings(clean_env):
     os.environ["DOCKER_HOST_URL"] = "npipe:////./pipe/docker_engine"
     
     return Settings(_env_file=None)
+
+@pytest.fixture
+def sandbox(test_settings):
+    """
+    Fixture providing an isolated SandboxManager instance for testing.
+    Guarantees container removal and temporary directory cleanup.
+    """
+    from vigil.core.sandbox_config import SandboxConfig
+    from vigil.core.sandbox_manager import Sandbox
+    
+    config = SandboxConfig()
+    settings = get_settings()
+    with Sandbox(config, settings.WORKSPACE_BASE_DIR, "pytest-fixture") as manager:
+        yield manager
