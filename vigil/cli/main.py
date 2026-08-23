@@ -112,6 +112,7 @@ def run(
     agent_version: str = typer.Option("develop", "--agent-version", "-v", help="Agent version tag for tracking."),
     model_provider: str = typer.Option("openai", "--provider", help="LLM provider (openai)."),
     model_name: str = typer.Option("gpt-4o-mini", "--model", help="LLM model name."),
+    concurrency: int = typer.Option(1, "--concurrency", "-c", help="Number of parallel task workers (1-5, max 5)."),
 ):
     """
     Execute an evaluation suite against an agent inside sandboxed containers.
@@ -131,11 +132,14 @@ def run(
         console.print(f"[bold red]Configuration Error:[/bold red] {e}")
         raise typer.Exit(code=1)
 
+    workers = max(1, min(concurrency, 5))
+
     console.print(f"[bold blue]Starting Vigil evaluation...[/bold blue]")
     console.print(f"  Suite: [yellow]{suite}[/yellow]")
     console.print(f"  Name: [yellow]{name}[/yellow]")
     console.print(f"  Agent Version: [yellow]{agent_version}[/yellow]")
-    console.print(f"  Model: [yellow]{model_provider}/{model_name}[/yellow]\n")
+    console.print(f"  Model: [yellow]{model_provider}/{model_name}[/yellow]")
+    console.print(f"  Concurrency: [yellow]{workers} worker(s) (max 5)[/yellow]\n")
 
     adapter = LangGraphAgentAdapter(model_provider=model_provider, model_name=model_name)
     runner = EvalRunner(agent_adapter=adapter, host_workspace_base=settings.WORKSPACE_BASE_DIR)
@@ -146,6 +150,7 @@ def run(
             suite_id=f"{name}-{agent_version}",
             name=name,
             agent_version=agent_version,
+            max_workers=workers,
         )
     except Exception as e:
         console.print(f"[bold red]Evaluation failed:[/bold red] {e}")
