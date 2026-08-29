@@ -1,9 +1,8 @@
 import uuid
 import math
-from typing import Optional
 from pydantic import BaseModel
 from sqlalchemy import select, func
-from sqlalchemy.orm import Session
+
 
 from vigil.db.models import EvalRun, EvalSuite, TaskResult, ToolCall, Anomaly
 from vigil.db.connection import get_session

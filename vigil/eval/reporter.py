@@ -1,14 +1,12 @@
 import os
 import json
-import logging
 from datetime import datetime, timezone
 from typing import Any
 from rich.console import Console
 from rich.table import Table
 
-logger = logging.getLogger(__name__)
-
 class VigilEvalReporter:
+
     """
     Handles compiling, rendering, and saving evaluation suite outcomes.
     Generates console-friendly tables and saves structured JSON reports.

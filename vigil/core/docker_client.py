@@ -2,7 +2,8 @@ import docker
 from functools import lru_cache
 from vigil.config import get_settings
 
-from vigil.core.exceptions import SandboxProvisionError, SandboxTeardownError
+from vigil.core.exceptions import SandboxProvisionError
+
 
 @lru_cache()
 def get_docker_client() -> docker.DockerClient:

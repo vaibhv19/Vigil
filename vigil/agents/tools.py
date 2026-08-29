@@ -1,7 +1,6 @@
-import shlex
 from typing import Union, List, Any
 from langchain_core.tools import BaseTool
-from pydantic import PrivateAttr
+
 
 from vigil.core.tool_executor import ToolExecutor
 from vigil.core.tool_models import ToolRequest

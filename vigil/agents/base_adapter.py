@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Any
 from vigil.core.tool_executor import ToolExecutor
+
 
 class BaseAgentAdapter(ABC):
     @abstractmethod

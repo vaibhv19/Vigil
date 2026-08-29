@@ -3,7 +3,8 @@ import os
 import time
 import uuid
 import threading
-from typing import Any, List, Optional
+from typing import Any, Optional
+
 
 from vigil.agents.base_adapter import BaseAgentAdapter
 from vigil.eval.task_models import TaskDefinition

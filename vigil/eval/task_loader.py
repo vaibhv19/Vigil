@@ -2,7 +2,7 @@ import os
 import logging
 import yaml
 from pydantic import ValidationError
-from vigil.eval.task_models import TaskDefinition, SuiteDefinition
+from vigil.eval.task_models import TaskDefinition
 from vigil.core.exceptions import TaskDefinitionValidationError
 
 logger = logging.getLogger(__name__)
@@ -64,21 +64,3 @@ class TaskLoader:
         except ValidationError as e:
             raise TaskDefinitionValidationError(f"Schema validation failed for {file_path}: {e}")
 
-    @staticmethod
-    def load_suite(file_path: str) -> SuiteDefinition:
-        """
-        Loads and validates a SuiteDefinition from a YAML file.
-        Raises TaskDefinitionValidationError on failure.
-        """
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-            if not data:
-                raise TaskDefinitionValidationError(f"Suite file is empty: {file_path}")
-            return SuiteDefinition.model_validate(data)
-        except FileNotFoundError:
-            raise TaskDefinitionValidationError(f"Suite definition file not found: {file_path}")
-        except yaml.YAMLError as e:
-            raise TaskDefinitionValidationError(f"Invalid YAML syntax in {file_path}: {e}")
-        except ValidationError as e:
-            raise TaskDefinitionValidationError(f"Schema validation failed for {file_path}: {e}")

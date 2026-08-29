@@ -1,5 +1,4 @@
 from typing import TypedDict, Annotated, Sequence, Any
-import logging
 from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
 from langgraph.graph.message import add_messages
 from langgraph.graph import StateGraph, START, END
@@ -10,7 +9,6 @@ from vigil.agents.tools import VigilSandboxTool
 from vigil.core.tool_executor import ToolExecutor
 from vigil.core.exceptions import AgentExecutionError
 
-logger = logging.getLogger(__name__)
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]

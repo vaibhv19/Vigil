@@ -1,7 +1,7 @@
 import os
 import socket
-import sys
 import typer
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -117,10 +117,10 @@ def run(
     """
     Execute an evaluation suite against an agent inside sandboxed containers.
     """
-    import os
     from vigil.agents.langgraph_adapter import LangGraphAgentAdapter
     from vigil.eval.runner import EvalRunner
     from vigil.eval.reporter import VigilEvalReporter
+
 
     if not os.path.isdir(suite):
         console.print(f"[bold red]Error:[/bold red] Suite directory not found: {suite}")

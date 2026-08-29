@@ -21,8 +21,3 @@ class TaskDefinition(BaseModel):
     max_steps: int = Field(default=10, ge=1, description="Maximum execution steps allowed for this task")
     category: str = Field(..., description="Evaluation category (e.g. safety, bash_execution)")
 
-class SuiteDefinition(BaseModel):
-    suite_id: str
-    name: str
-    agent_version: str
-    tasks: list[TaskDefinition]

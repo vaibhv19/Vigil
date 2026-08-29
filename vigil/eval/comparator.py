@@ -1,12 +1,11 @@
 import uuid
-from typing import Optional
 from pydantic import BaseModel
 from sqlalchemy import select, func
-from sqlalchemy.orm import Session
 
 from vigil.db.models import EvalRun, EvalSuite, TaskResult, Task, ToolCall, Anomaly
 from vigil.db.connection import get_session
-from vigil.eval.metrics import MetricsEngine, RunSummaryMetrics
+from vigil.eval.metrics import MetricsEngine
+
 
 
 class TaskComparison(BaseModel):
