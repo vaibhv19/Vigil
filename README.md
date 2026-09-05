@@ -8,9 +8,9 @@ Vigil is a programmatic evaluation harness that runs AI agents inside ephemeral,
 
 ## Related Writing
 
-* [Designing for Failure](https://vaibhav19.vercel.app/writing/when-model-answered-isnt-enough)
-* [Building Agents Twice](https://vaibhav19.vercel.app/writing/building-multi-agent-systems-twice-from-context-unification-to-agent-evaluation)
-* [ENGINEERING JOURNEY](https://vaibhav19.vercel.app/writing/engineering-journey)
+* [Designing for Failure](https://vaibhv19.dev/writing/when-model-answered-isnt-enough)
+* [Building Agents Twice](https://vaibhv19.dev/writing/building-multi-agent-systems-twice-from-context-unification-to-agent-evaluation)
+* [ENGINEERING JOURNEY](https://vaibhv19.dev/writing/engineering-journey)
 
 ---
 
